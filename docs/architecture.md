@@ -15,7 +15,7 @@
 │                     LangGraph Orchestrator                     │
 │                                                                │
 │  ┌────────────┐   ┌────────────┐   ┌──────────────────────┐    │
-│  │ Topology   │──▶│ Parallel   │──▶│ Root-Cause Reasoner  │    │
+│  │ Topology   │──>│ Parallel   │──>│ Root-Cause Reasoner  │    │
 │  │ Resolver   │   │ Diagnostor │   │ (LLM)                │    │
 │  └────────────┘   └────────────┘   └──────────┬───────────┘    │
 │                                               │                │
