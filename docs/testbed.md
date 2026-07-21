@@ -4,9 +4,9 @@
 
 ## 1. 설계 원칙
 
-- **최소 실물 + 최대 가상화**: 물리로 확보해야 하는 건 GPU와 KVM 호스트 정도. 네트워크 장비는 초기엔 containerlab, 물리는 Phase 2 이후.
-- **벤더 단일화**: 네트워크/보안 모두 Juniper 계열로 통일 (Junos CLI가 스위치·라우터·SRX에서 공통이라 어댑터 재활용 이득).
-- **관리 대상 다양성**: Linux + Windows + Juniper 3종은 Phase 1부터 어댑터 스켈레톤 확보.
+- **최소 실물 + 최대 가상화**: 물리로 확보해야 하는 건 GPU와 호스트 물리 서버 정도. 네트워크 장비는 초기엔 containerlab, 물리는 Phase 2 이후.
+- **네트워크 벤더 단일화 (보안은 별도)**: 네트워크(스위치·라우터)는 Juniper로 통일. 보안장비는 사내 표준인 **Fortinet(FortiGate)·SECUI(엑스게이트)** 계열이므로 별도 어댑터 트랙.
+- **관리 대상 다양성**: Linux + Windows + Juniper + 보안(Fortinet/SECUI) 4종 어댑터 스켈레톤 확보.
 - **증분 확장**: Phase 1은 4대 물리로 시작, 이후 필요 시 스위치·GPU 노드 추가.
 
 ## 2. 물리 하드웨어
@@ -15,14 +15,14 @@
 |---|---|---|---|---|
 | G1 | LLM 호스팅 (Ollama) | A6000 48GB *1 or RTX 4090 24GB *2 / RAM 128GB / NVMe 1TB | 1 | qwen2.5:14b 기본, 32b Q4 fallback |
 | G2 | 진단 대상 GPU 노드 | RTX 3090/4090 *1~2 / RAM 64GB | 1~2 | chaos 주입 대상 (gpu-burn, Xid 유발) |
-| H1 | KVM/Proxmox 호스트 A | 24 vCPU / 128GB / SSD 2TB | 1 | 오케스트레이터 + 관측 VM 얹음 |
-| H2 | KVM/Proxmox 호스트 B | 24 vCPU / 128GB / SSD 2TB | 1 | containerlab + 테스트 대상 VM 얹음 |
+| H1 | 호스트 물리 서버 A | 24 vCPU / 128GB / SSD 2TB | 1 | 오케스트레이터 + 관측 VM 얹음 |
+| H2 | 호스트 물리 서버 B | 24 vCPU / 128GB / SSD 2TB | 1 | containerlab + 테스트 대상 VM 얹음 |
 
 **합계 Phase 1: 물리 4~5대.**
 
 ## 3. 가상 머신 배치
 
-### 3.1 KVM 호스트 A (H1)
+### 3.1 호스트 물리 서버 A (H1)
 
 | VM | OS | vCPU / RAM / Disk | 역할 |
 |---|---|---|---|
@@ -30,7 +30,7 @@
 | L2 | Ubuntu 22.04 | 8 / 32GB / 500GB SSD | 관측 스택 (Prometheus, Alertmanager, Loki, Grafana) |
 | W1 | Windows Server 2022 Std | 4 / 8GB / 100GB | 중개서버 (기존 관리 대상, WinRM 진단) |
 
-### 3.2 KVM 호스트 B (H2)
+### 3.2 호스트 물리 서버 B (H2)
 
 | VM | OS | vCPU / RAM / Disk | 역할 |
 |---|---|---|---|
@@ -75,8 +75,8 @@
    [Alertmanager] ──▶ [Orchestrator]
                             │
                             ▼
-              ┌── vSRX (Firewall, Junos) ──┐
-              │                            │
+              ┌── FortiGate VM (or SECUI) ──┐
+              │                             │
          [HAProxy Active] ─── [HAProxy Standby]
               │
      ┌────────┴────────┐
@@ -84,7 +84,8 @@
   [Apache / L4]     [IIS / W2]
 ```
 
-- vSRX는 60일 eval, 이후 사내 SRX 재고나 라이선스 확보 여부에 따라 결정
+- **FortiGate VM eval** (FortiGate-VM64, 15일 평가판)으로 방화벽 계층 시작. 이후 사내 라이선스 or EOL 재고로 전환.
+- **SECUI 엑스게이트**는 벤더 특성상 VM 배포가 제한적. 사내 재고 실물 확보 시 Phase 3에서 편입.
 - HAProxy는 keepalived 없이 시작 (풀 상태 조작만 시나리오화)
 
 ### 4.3 Phase 3 (물리 편입)
@@ -102,10 +103,10 @@
 | WinRM | W1, W2 | `pywinrm` + async wrapper | 1 |
 | Prometheus API | 관측 | `httpx` | 1 |
 | DCGM Exporter | G2 | Prometheus 경유 | 1 |
-| Juniper SRX (vSRX) | Firewall | 위 Juniper 어댑터 재사용 | 2 |
+| FortiGate REST | FortiGate VM / 물리 | `fortiosapi` or `httpx` (FortiOS REST) | 2 |
 | HAProxy stats/socket | LB1, LB2 | `httpx` + unix socket | 2 |
+| SECUI 엑스게이트 | 사내 재고 편입 시 | SSH CLI + syslog 파싱 (공식 라이브러리 없음, 자체 어댑터) | 3 |
 | F5 iControl REST | (옵션) | `httpx` | 3 |
-| FortiGate/Palo REST | (옵션) | `httpx` | 3 |
 
 ## 6. Chaos 시나리오 (Phase 1 최소 세트)
 
@@ -123,7 +124,9 @@
 ## 7. 오픈 이슈
 
 - **중개서버 W1의 역할 정의**: 단순 관리 대상인지, 에이전트가 최종 장비 접근 시 경유하는 jump host인지? 후자면 asyncssh `ProxyCommand` 로직 필요.
-- **vJunos 라이선스**: vJunos-switch는 무료지만 **vMX / vSRX는 eval 60일**. Phase 2 이후 사내 라이선스 확보 여부 확인.
+- **vJunos 라이선스**: vJunos-switch는 무료지만 **vMX는 eval 60일**. Phase 2 이후 사내 라이선스 확보 여부 확인.
+- **FortiGate VM 라이선스**: 평가판 15일. 개발 사이클이 길어지면 사내 라이선스 확보 or 물리 편입 필요.
+- **SECUI 어댑터 개발 리소스**: 국내 벤더 특성상 공식 SDK/파이썬 라이브러리 부재. CLI/syslog 기반 자체 어댑터 개발 공수 산정 필요.
 - **호스트 A/B 이중화**: 현재 단일 호스트 장애 시 오케스트레이터 자체가 다운. Phase 3~4에서 이중화 정책 결정.
 - **네트워크 세그먼트**: mgmt / data / chaos 트래픽을 별도 VLAN으로 분리할지, 초기엔 단일 VLAN에서 시작할지.
 - **Windows 진단 깊이**: WinRM PS Remoting 범위. AD 도메인 미참여 stand-alone 서버 가정으로 시작하는 게 안전.
@@ -131,10 +134,10 @@
 ## 8. 초기 세팅 체크리스트
 
 - [ ] 물리 4대 확보 (G1, G2, H1, H2)
-- [ ] H1/H2에 Proxmox VE 8.x 설치
+- [ ] H1/H2 하이퍼바이저 선정 및 설치
 - [ ] 인벤토리 YAML 초안 작성 (`inventory/testbed.yaml`)
 - [ ] Ollama on G1 + qwen2.5:14b pull
 - [ ] containerlab on L3 + vJunos-switch spine/leaf 토폴로지
 - [ ] Prometheus + Alertmanager on L2, 최소 스크레이프 타겟 등록
-- [ ] Linux/Windows/Juniper 어댑터 스켈레톤 3종
+- [ ] Linux/Windows/Juniper 어댑터 스켈레톤 3종 (보안 어댑터는 Phase 2)
 - [ ] Chaos 시나리오 CX-01 ~ CX-05 스크립트
