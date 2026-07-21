@@ -26,16 +26,16 @@
 
 | VM | OS | vCPU / RAM / Disk | 역할 |
 |---|---|---|---|
-| L1 | Ubuntu 22.04 | 8 / 32GB / 300GB | 오케스트레이터 (LangGraph 앱) + Chroma |
-| L2 | Ubuntu 22.04 | 8 / 32GB / 500GB SSD | 관측 스택 (Prometheus, Alertmanager, Loki, Grafana) |
+| LX1 | Ubuntu 22.04 | 8 / 32GB / 300GB | 오케스트레이터 (LangGraph 앱) + Chroma |
+| LX2 | Ubuntu 22.04 | 8 / 32GB / 500GB SSD | 관측 스택 (Prometheus, Alertmanager, Loki, Grafana) |
 | W1 | Windows Server 2022 Std | 4 / 8GB / 100GB | 중개서버 (기존 관리 대상, WinRM 진단) |
 
 ### 3.2 호스트 물리 서버 B (H2)
 
 | VM | OS | vCPU / RAM / Disk | 역할 |
 |---|---|---|---|
-| L3 | Ubuntu 22.04 | 16 / 64GB / 200GB | containerlab 호스트 (vJunos, vSRX, cRPD) |
-| L4 | Ubuntu 22.04 | 4 / 8GB / 50GB | Apache 웹 (테스트 대상) |
+| LX3 | Ubuntu 22.04 | 16 / 64GB / 200GB | containerlab 호스트 (vJunos, vSRX, cRPD) |
+| LX4 | Ubuntu 22.04 | 4 / 8GB / 50GB | Apache 웹 (테스트 대상) |
 | W2 | Windows Server 2022 Std | 4 / 8GB / 100GB | IIS 웹 (테스트 대상) |
 | LB1 | Ubuntu 22.04 | 2 / 4GB / 20GB | HAProxy (Active) — Phase 2 |
 | LB2 | Ubuntu 22.04 | 2 / 4GB / 20GB | HAProxy (Standby) — Phase 2 |
@@ -46,13 +46,13 @@
 
 ```
                        ┌───────────────┐
-                       │  L1  L2  W1   │  (호스트 A)
+                       │  LX1  LX2  W1   │  (호스트 A)
                        └───────┬───────┘
                                │ mgmt VLAN
                                │
 ┌──────────────────────────────┼──────────────────────────────┐
 │                              │                              │
-│   containerlab (on L3)                                      │
+│   containerlab (on LX3)                                      │
 │                                                             │
 │      [vJunos-switch: spine1]                                │
 │              │      │                                       │
@@ -61,7 +61,7 @@
 │  [vJunos-switch: leaf1]  [vJunos-switch: leaf2]             │
 │      │                      │                               │
 │      ▼                      ▼                               │
-│    L4 / W2                 G2 (GPU 대상)                    │
+│    LX4 / W2                 G2 (GPU 대상)                    │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -69,7 +69,7 @@
 - vJunos-switch는 무료 (Juniper 공식 컨테이너, 2023~), QFX 계열 CLI 그대로 사용
 - 물리 서버(G2)는 호스트 B의 브리지 인터페이스를 통해 containerlab MAC-VLAN에 붙임
 
-### 4.2 Phase 2 확장 (L4 + FW)
+### 4.2 Phase 2 확장 (로드밸런서 + 방화벽)
 
 ```
    [Alertmanager] ──▶ [Orchestrator]
@@ -81,7 +81,7 @@
               │
      ┌────────┴────────┐
      ▼                 ▼
-  [Apache / L4]     [IIS / W2]
+  [Apache / LX4]     [IIS / W2]
 ```
 
 - **FortiGate VM eval** (FortiGate-VM64, 15일 평가판)으로 방화벽 계층 시작. 이후 사내 라이선스 or EOL 재고로 전환.
@@ -98,7 +98,7 @@
 
 | 어댑터 | 대상 | 라이브러리 | Phase |
 |---|---|---|---|
-| Linux SSH | L1~L4, G1, G2 | `asyncssh` | 1 |
+| Linux SSH | LX1~LX4, G1, G2 | `asyncssh` | 1 |
 | Juniper CLI | vJunos, 물리 EX | `netmiko` (device_type=`juniper_junos`) or `scrapli` | 1 |
 | WinRM | W1, W2 | `pywinrm` + async wrapper | 1 |
 | Prometheus API | 관측 | `httpx` | 1 |
@@ -113,7 +113,7 @@
 | ID | 대상 | 유발 방법 | 기대 진단 결과 |
 |---|---|---|---|
 | CX-01 | G2 | `nvidia-smi -r` 실패 유도, gpu-burn 도중 킬 | GPU hang / Xid 감지 |
-| CX-02 | L4/W2 | Apache/IIS 프로세스 kill | HTTP 5xx → 서비스 다운 판정 |
+| CX-02 | LX4/W2 | Apache/IIS 프로세스 kill | HTTP 5xx → 서비스 다운 판정 |
 | CX-03 | vJunos leaf1 | `set interfaces ge-0/0/x disable` | 링크 다운 → 상단 경로 원인 판정 |
 | CX-04 | vJunos spine1 | LLDP·MAC 테이블 비우기 (재기동) | 토폴로지 loss 감지 |
 | CX-05 | W1 | WinRM 서비스 stop | 중개서버 접근 불가 감지 |
@@ -137,7 +137,7 @@
 - [ ] H1/H2 하이퍼바이저 선정 및 설치
 - [ ] 인벤토리 YAML 초안 작성 (`inventory/testbed.yaml`)
 - [ ] Ollama on G1 + qwen2.5:14b pull
-- [ ] containerlab on L3 + vJunos-switch spine/leaf 토폴로지
-- [ ] Prometheus + Alertmanager on L2, 최소 스크레이프 타겟 등록
+- [ ] containerlab on LX3 + vJunos-switch spine/leaf 토폴로지
+- [ ] Prometheus + Alertmanager on LX2, 최소 스크레이프 타겟 등록
 - [ ] Linux/Windows/Juniper 어댑터 스켈레톤 3종 (보안 어댑터는 Phase 2)
 - [ ] Chaos 시나리오 CX-01 ~ CX-05 스크립트
