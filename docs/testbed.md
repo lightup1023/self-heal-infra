@@ -20,6 +20,28 @@
 
 **합계 Phase 1: 물리 4~5대.**
 
+## 2.1 하이퍼바이저 선정 (결정: Proxmox VE)
+
+H1/H2에 올릴 하이퍼바이저로 OpenStack(Kolla-ansible) vs libvirt 직접 vs Proxmox VE를 검토함.
+별도 물리 서버(OpenStack-IDC)에 Kolla-ansible로 All-in-One OpenStack을 직접 구축·운영해본 뒤 **OpenStack은 제외**하기로 결정.
+
+**OpenStack을 뺀 이유 (오버스펙 판단):**
+- 멀티테넌시(Keystone), self-service API, HA 컨트롤플레인(haproxy+keepalived+갈레라 클러스터) 등
+  OpenStack의 핵심 가치를 이 testbed에서는 전혀 쓰지 않음 (VM 9대 고정 세트, 혼자 운영, 이중화 불필요)
+- Neutron이 네트워킹(VXLAN 오버레이·보안그룹·플로팅IP)을 OVS로 직접 소유하려고 해서, **4.1의 "순수 브리지로
+  containerlab MAC-VLAN에 붙인다"는 설계와 상충** — Neutron 추상화를 우회하거나 억지로 맞춰야 함
+- 컨트롤플레인 자체가 컨테이너 38개, 유휴 상태에서도 RAM 14GB+ 소모 → "진단 대상 VM"보다 "VM을 관리하는
+  시스템"이 더 무거워지는 역전이 생김
+- VIP 충돌, 컨테이너 config diff 버그, Nova cell DB 동기화 등 이 testbed 목적과 무관한 트러블슈팅 비용이 계속 발생
+
+**Proxmox VE를 선택한 이유:**
+- 설치~운영이 웹 UI 하나로 완결 (Horizon+Keystone+Neutron+Cinder처럼 여러 서비스를 조합해서 이해할 필요 없음)
+- 기본 네트워킹이 순수 리눅스 브리지(`vmbr0`) — containerlab에 붙이는 구조(4.1)와 바로 맞음
+- 스냅샷/클론 내장 — chaos 시나리오(6번) 실행 후 VM 상태 원복이 UI 클릭 몇 번으로 가능
+- GPU 패스스루(G2)는 IOMMU/VFIO 설정이 필요하지만, 홈랩 커뮤니티 자료가 많고 OpenStack Nova의 PCI
+  whitelist 설정보다 단순함
+- H1/H2 각각 단일 노드로 시작. 클러스터링/라이브마이그레이션은 필요해지면(§7 "호스트 A/B 이중화") 이후 검토
+
 ## 3. 가상 머신 배치
 
 ### 3.1 호스트 물리 서버 A (H1)
@@ -134,7 +156,8 @@
 ## 8. 초기 세팅 체크리스트
 
 - [ ] 물리 4대 확보 (G1, G2, H1, H2)
-- [ ] H1/H2 하이퍼바이저 선정 및 설치
+- [x] H1/H2 하이퍼바이저 선정 — **Proxmox VE** (근거: §2.1)
+- [ ] H1/H2에 Proxmox VE 설치
 - [ ] 인벤토리 YAML 초안 작성 (`inventory/testbed.yaml`)
 - [ ] Ollama on G1 + qwen2.5:14b pull
 - [ ] containerlab on LX3 + vJunos-switch spine/leaf 토폴로지
