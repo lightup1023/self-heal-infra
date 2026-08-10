@@ -15,10 +15,25 @@
 |---|---|---|---|---|
 | G1 | LLM 호스팅 (Ollama) | A6000 48GB *1 or RTX 4090 24GB *2 / RAM 128GB / NVMe 1TB | 1 | qwen2.5:14b 기본, 32b Q4 fallback |
 | G2 | 진단 대상 GPU 노드 | RTX 3090/4090 *1~2 / RAM 64GB | 1~2 | chaos 주입 대상 (gpu-burn, Xid 유발) |
-| H1 | 호스트 물리 서버 A | 24 vCPU / 128GB / SSD 2TB | 1 | 오케스트레이터 + 관측 VM 얹음 |
-| H2 | 호스트 물리 서버 B | 24 vCPU / 128GB / SSD 2TB | 1 | containerlab + 테스트 대상 VM 얹음 |
+| H1 | 호스트 물리 서버 A | 24 vCPU(코어) / RAM 96GB / SSD 2TB | 1 | 오케스트레이터 + 관측 VM 얹음 |
+| H2 | 호스트 물리 서버 B | 32~36 vCPU(코어) / RAM 112GB / SSD 2TB | 1 | containerlab + 테스트 대상 VM 얹음 |
 
 **합계 Phase 1: 물리 4~5대.**
+
+### 2.1 H1/H2 최소 스펙 산출 근거
+
+§3의 VM 배치표(vCPU/RAM/Disk 합) + 하이퍼바이저(Proxmox) 오버헤드(+2 vCPU/+8GB/+32GB) + 여유분(~15%, 스냅샷·버스트 대비)로 역산.
+
+| 호스트 | VM 합계 | + 오버헤드/여유분 | 최소 권장 |
+|---|---|---|---|
+| H1 (LX1+LX2+W1) | 20 vCPU / 72GB / 900GB | +4 vCPU / +20GB / +182GB | **24 vCPU / 96GB / 1.1TB** |
+| H2 (LX3+LX4+W2+LB1+LB2) | 28 vCPU / 88GB / 390GB | +6 vCPU / +22GB / +97GB | **34 vCPU / 110GB / ~500GB** |
+
+H2는 VM vCPU 합(28)이 물리 24코어보다 많아 오버서브스크립션이 빡빡했음 — containerlab의 vJunos들은 대부분
+유휴 상태라 어느 정도 오버서브는 괜찮지만, chaos 시나리오 도중 CPU 경합으로 진단이 왜곡될 위험이 있어 물리
+코어를 32~36개로 올림. RAM/Disk는 여유가 있어서 기존 128GB/2TB 유지해도 무방 (표에는 최소값만 반영).
+
+G1/G2(GPU 노드)는 H1/H2와 별개 물리라 이 산출에는 포함하지 않음.
 
 ## 2.1 하이퍼바이저 선정 (결정: Proxmox VE)
 
