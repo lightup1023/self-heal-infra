@@ -45,7 +45,10 @@ H1+H2 합산 필요치(vCPU 20+28=48, RAM 72+88=160GB)가 실제 호스트 물�
 Phase 1은 우선순위가 낮은 VM(LB1/LB2, 관측 스택 일부)을 축소 배치하거나 순차 기동으로 시작하고, 실사용량을
 보며 조정한다.
 
-## 2.1 하이퍼바이저 선정 (1차 결정: Proxmox VE → 2차 결정: OpenStack-IDC 재활용)
+## 2.1 하이퍼바이저 선정 (1차 결정, 2026-08-10: Proxmox VE — ⚠️ 2026-09-15 §2.2에서 번복됨)
+
+> **이 섹션은 1차 결정 당시 기록 그대로 보존한 것이며, 현재 유효한 결정이 아니다.** 최종 결정과 사유는
+> 아래 §2.2를 참고할 것.
 
 H1/H2에 올릴 하이퍼바이저로 OpenStack(Kolla-ansible) vs libvirt 직접 vs Proxmox VE를 검토함.
 별도 물리 서버(OpenStack-IDC)에 Kolla-ansible로 All-in-One OpenStack을 직접 구축·운영해본 뒤 **OpenStack은 제외**하기로 결정.
