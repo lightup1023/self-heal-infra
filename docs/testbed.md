@@ -13,12 +13,12 @@
 
 | # | 역할 | 최소 사양 | 수량 | 비고 |
 |---|---|---|---|---|
-| G1 | LLM 호스팅 (Ollama) | A6000 48GB *1 or RTX 4090 24GB *2 / RAM 128GB / NVMe 1TB | 1 | qwen2.5:14b 기본, 32b Q4 fallback |
-| G2 | 진단 대상 GPU 노드 | RTX 3090/4090 *1~2 / RAM 64GB | 1~2 | chaos 주입 대상 (gpu-burn, Xid 유발) |
+| G1 | LLM 호스팅 (Ollama) | ~~A6000 48GB *1 or RTX 4090 24GB *2 / RAM 128GB / NVMe 1TB~~ → 신규 확보 불필요 | 0 | 2026-09-15: 팀 공용 GPU 서버(4090×2) 재활용, 원격 API 호출로 대체 (§2.3) |
+| G2 | 진단 대상 GPU 노드 | RTX 3090/4090 *1~2 / RAM 64GB | 1~2 | chaos 주입 대상 (gpu-burn, Xid 유발) — **2026-09-15: Phase 1 제외** (§2.3), 확보 시 Phase 2+ |
 | H1 | 호스트 물리 서버 A | 24 vCPU(코어) / RAM 96GB / SSD 2TB | 1 | 오케스트레이터 + 관측 VM 얹음 |
 | H2 | 호스트 물리 서버 B | 32~36 vCPU(코어) / RAM 112GB / SSD 2TB | 1 | containerlab + 테스트 대상 VM 얹음 |
 
-**합계 Phase 1: 물리 4~5대.**
+**합계 Phase 1: 물리 4~5대.** → **2026-09-15 이후: 신규 물리 확보 0대** (H1/H2=OpenStack-IDC 재활용, G1=팀 공용 GPU 서버 재활용, G2=Phase 1 제외). 상세는 아래 업데이트 배너 + §2.3 참고.
 
 > **2026-09-15 업데이트 (물리 통합):** H1/H2는 신규 물리 확보 없이 기존 `OpenStack-IDC` 서버(Rocky Linux 10.2,
 > 32 vCPU / 93GB RAM, GPU 미장착, kolla-ansible OpenStack 운영 중)로 통합. 신규 물리 확보 대상은 **G1/G2(GPU
@@ -110,6 +110,23 @@ Neutron의 ml2/OVS 설정은 건드리지 않는다. 대신:
 **§3(VM 배치)의 H1/H2 물리 서버 구분은 이제 물리적 구분이 아니라 논리적 그룹(Nova 인스턴스 그룹)으로
 읽는다** — 모든 VM이 같은 물리 호스트 위 Nova 인스턴스로 올라간다.
 
+## 2.3 GPU(G1/G2) 확보 결정 (2026-09-15)
+
+**G1 (LLM 호스팅) — 팀 공용 GPU 서버 재활용.** 별도 랙에서 팀이 같이 운영 중인 GPU 서버(RTX 4090 ×2,
+현재 Ollama 전용으로 사용 중)를 그대로 재사용한다. self-heal-infra 오케스트레이터는 이 서버의 기존 Ollama
+API 엔드포인트를 **원격 LLM API처럼 호출**만 하면 되므로 신규 GPU 확보 불필요 — §2 하드웨어 표의 G1 물리
+확보 항목은 취소.
+
+- **주의:** 팀 공용/운영 자원이므로 self-heal-infra의 reasoning 호출이 기존 서비스 응답 지연에 영향을 주지
+  않는 선에서만 사용한다. 대량 배치 추론이나 장시간 점유 작업은 하지 않는다.
+- **오픈 이슈:** 이 GPU 서버가 OpenStack-IDC와 다른 랙에 있어 네트워크 경로(같은 VLAN인지, 방화벽 통과가
+  필요한지)를 아직 확인하지 않음 — §7에 추가.
+
+**G2 (chaos 대상 GPU) — 그 팀 공용 서버 재사용 불가, Phase 1 제외.** CX-01 시나리오(`nvidia-smi -r` 강제
+실패, gpu-burn 도중 kill로 Xid 유발)는 GPU를 고의로 고장내는 테스트라, 다른 사람/서비스가 의존하는 운영
+자원에서는 절대 실행하지 않는다. 신규 GPU를 별도로 확보하기 전까지 **G2 관련 항목(§4.1 다이어그램의 G2
+노드, §6의 CX-01)은 Phase 1 범위에서 제외**하고 Phase 2+로 이연한다.
+
 ## 3. 가상 머신 배치
 
 ### 3.1 호스트 물리 서버 A (H1)
@@ -161,6 +178,8 @@ Neutron의 ml2/OVS 설정은 건드리지 않는다. 대신:
 - **2026-09-15 갱신:** 위 다이어그램은 Proxmox 물리 브리지 전제. OpenStack-IDC 재활용 후에는 LX1/LX2/W1/LX4/W2/LB1/LB2가
   전부 Neutron `shared-net` 위 Nova 인스턴스이고, containerlab(vJunos spine/leaf, LX3에 해당하는 역할)만
   별도 Docker 네임스페이스로 떠서 `shared-net`의 `qrouter` netns와 veth로 L3 연결된다 (근거: §2.2).
+- **2026-09-15 (G2 제외):** 다이어그램의 `G2 (GPU 대상)` 노드는 Phase 1에서 실물이 없다 (§2.3 — 팀 공용
+  GPU 서버는 chaos 대상으로 쓸 수 없고, 별도 확보 전까지 제외). Phase 1 실제 리프 하위 대상은 `LX4/W2`만.
 
 ### 4.2 Phase 2 확장 (로드밸런서 + 방화벽)
 
@@ -212,6 +231,8 @@ Neutron의 ml2/OVS 설정은 건드리지 않는다. 대신:
 | CX-05 | W1 | WinRM 서비스 stop | 중개서버 접근 불가 감지 |
 | CX-06 | LB1 (Phase 2) | 풀 멤버 강제 disable | LB 헬스체크 실패 판정 |
 
+**2026-09-15:** CX-01(G2 대상)은 §2.3 GPU 결정에 따라 Phase 1에서 제외, G2 신규 확보 시 Phase 2+에서 진행한다.
+
 각 시나리오는 chaos 스크립트(`chaos/*.py`)로 재현 가능해야 한다.
 
 ## 7. 오픈 이슈
@@ -224,15 +245,17 @@ Neutron의 ml2/OVS 설정은 건드리지 않는다. 대신:
   전부 같은 물리 서버 위에 올라가므로, 이 서버 하나가 죽으면 오케스트레이터+테스트 대상 전체가 동시에 다운된다.
   기존 "호스트 A/B 이중화" 논의보다 더 근본적인 SPOF. Phase 3~4에서 별도 물리 확보 여부 재검토.
 - **네트워크 세그먼트**: mgmt / data / chaos 트래픽을 별도 VLAN으로 분리할지, 초기엔 단일 VLAN에서 시작할지.
+- **팀 공용 GPU 서버(G1) 네트워크 경로 미확인**: OpenStack-IDC와 다른 랙에 있음. 같은 VLAN/L3 경로로
+  Ollama API(기본 포트 11434)에 바로 붙는지, 방화벽 통과가 필요한지 확인 필요 (§2.3).
 - **Windows 진단 깊이**: WinRM PS Remoting 범위. AD 도메인 미참여 stand-alone 서버 가정으로 시작하는 게 안전.
 
 ## 8. 초기 세팅 체크리스트
 
-- [ ] 물리 4대 확보 (G1, G2, H1, H2)
+- [x] 물리 확보 계획 재점검 — ~~물리 4대 신규 확보~~ → **신규 확보 0대**: H1/H2=OpenStack-IDC, G1=팀 공용 GPU 서버 재활용, G2=Phase 1 제외 (근거: §2.2, §2.3)
 - [x] H1/H2 하이퍼바이저 선정 — ~~Proxmox VE~~ → **OpenStack-IDC 서버 재활용** (근거: §2.2, 2026-09-15 번복)
 - [x] H1/H2에 Proxmox VE 설치 — ~~불필요 (OpenStack-IDC 재활용으로 대체)~~
 - [ ] 인벤토리 YAML 초안 작성 (`inventory/testbed.yaml`)
-- [ ] Ollama on G1 + qwen2.5:14b pull
+- [ ] G1: 팀 공용 GPU 서버의 Ollama 엔드포인트 연결 확인 (네트워크 경로 + qwen2.5:14b 모델 존재 여부, 없으면 pull 요청)
 - [ ] containerlab on LX3 + vJunos-switch spine/leaf 토폴로지
 - [ ] Prometheus + Alertmanager on LX2, 최소 스크레이프 타겟 등록
 - [ ] Linux/Windows/Juniper 어댑터 스켈레톤 3종 (보안 어댑터는 Phase 2)
